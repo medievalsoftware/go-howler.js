@@ -1,5 +1,3 @@
-//go:build js && wasm
-
 package howler
 
 import (
@@ -7,146 +5,232 @@ import (
 	"syscall/js"
 )
 
-var ErrSpriteNotFound = errors.New("sprite not found")
+var howl = js.Global().Get("Howl")
+var howler = js.Global().Get("Howler")
+var muted bool
 
-type ID int
+func New(opts HowlOptions) Howl {
+	var tmp = js.Global().Get("Object").New()
+	tmp.Set("src", opts.Source)
 
-type Sound struct {
-	// the backing value
-	value js.Value
-
-	// The sources to the track(s) to be loaded for the sound (URLs or base64 data
-	// URIs). These should be in order of preference, howler.js will automatically
-	// load the first one that is compatible with the current browser. If your files
-	// have no extensions, you will need to explicitly specify the extension using
-	// the format property.
-	Source []string
-
-	// The volume of the specific track, from 0.0 to 1.0.
-	Volume float32
-
-	// Set to true to force HTML5 Audio. This should be used for large audio files so
-	// that you don't have to wait for the full file to be downloaded and decoded
-	// before playing.
-	HTML5 bool
-
-	// Set to true to automatically loop the sound forever.
-	Loop bool
-
-	// Automatically begin downloading the audio file when the Howl is defined. If
-	// using HTML5 Audio, you can set this to 'metadata' to only preload the file's
-	// metadata (to get its duration without download the entire file, for example).
-	Preload bool
-
-	// Set to true to automatically start playback when sound is loaded.
-	Autoplay bool
-
-	// Set to true to load the audio muted.
-	Mute bool
-
-	// Define a sound sprite for the sound.
-	Sprites map[string]Sprite
-
-	// The rate of playback. 0.5 to 4.0, with 1.0 being normal speed.
-	Rate float32
-
-	// The size of the inactive sounds pool. Once sounds are stopped or finish
-	// playing, they are marked as ended and ready for cleanup. We keep a pool of
-	// these to recycle for improved performance. Generally this doesn't need to be
-	// changed. It is important to keep in mind that when a sound is paused, it won't
-	// be removed from the pool and will still be considered active so that it can be
-	// resumed later.
-	Pool int
-
-	// Howler.js automatically detects your file format from the extension, but you
-	// may also specify a format in situations where extraction won't work (such as
-	// with a SoundCloud stream).
-	Formats []string
-
-	// When using Web Audio, howler.js uses an XHR request to load the audio files.
-	// If you need to send custom headers, set the HTTP method or enable
-	// withCredentials (see reference), include them with this parameter. Each is
-	// optional (method defaults to GET, headers default to null and withCredentials
-	// defaults to false).
-	XHR js.Value
-
-	// Fires when the sound is loaded.
-	OnLoad func()
-
-	// Fires when the sound is unable to load. The first parameter is the ID of the
-	// sound (if it exists) and the second is the error message/code.
-	OnLoadError func(id ID, err js.Value)
-
-	// Fires when the sound is unable to play. The first parameter is the ID of the
-	// sound and the second is the error message/code.
-	OnPlayError func(id ID, err js.Value)
-
-	// Fires when the sound begins playing. The first parameter is the ID of the
-	// sound.
-	OnPlay func(id ID)
-
-	// Fires when the sound finishes playing (if it is looping, it'll fire at the end
-	// of each loop). The first parameter is the ID of the sound.
-	OnEnd func(id ID)
-
-	// Fires when the sound has been paused. The first parameter is the ID of the
-	// sound.
-	OnPause func(id ID)
-
-	// Fires when the sound has been stopped. The first parameter is the ID of the
-	// sound.
-	OnStop func(id ID)
-
-	// Fires when the sound has been muted/unmuted. The first parameter is the ID of the sound.
-	OnMute func(id ID)
-
-	// Fires when the sound's volume has changed. The first parameter is the ID of the sound.
-	OnVolume func(id ID)
-
-	//Fires when the sound's playback rate has changed. The first parameter is the ID of the sound.
-	OnRate func(id ID)
-
-	//Fires when the sound has been seeked. The first parameter is the ID of the sound.
-	OnSeek func(id ID)
-
-	// Fires when the current sound finishes fading in/out. The first parameter is the ID of the sound.
-	OnFade func(id ID)
-
-	// Fires when audio has been automatically unlocked through a touch/click event.
-	OnUnlock func()
-}
-
-// Play begins playback of a sound. Returns the sound id to be used with other
-// methods.
-func (s *Sound) Play() ID {
-	return ID(s.value.Call("play").Int())
-}
-
-// PlayID will play a new sound will play based on the sprite's definition.
-func (s *Sound) PlayID(id ID) ID {
-	return ID(s.value.Call("play", js.ValueOf(id)).Int())
-}
-
-// PlaySprite will play the previously played sound (for example, after pausing
-// it). However, if an ID of a sound that has been drained from the pool is
-// passed, nothing will play.
-func (s *Sound) PlaySprite(name string) (ID, error) {
-	if sprite, ok := s.Sprites[name]; ok {
-		return ID(s.value.Call("play", sprite.value).Int()), nil
+	if opts.Volume != nil {
+		tmp.Set("volume", opts.Volume)
 	}
-	return -1, ErrSpriteNotFound
+
+	if opts.HTML5 {
+		tmp.Set("html5", true)
+	}
+
+	if opts.Loop {
+		tmp.Set("loop", true)
+	}
+
+	if opts.Preload != nil {
+		tmp.Set("preload", opts.Preload)
+	}
+
+	if opts.Autoplay {
+		tmp.Set("autoplay", true)
+	}
+
+	if opts.Mute {
+		tmp.Set("mute", true)
+	}
+
+	if opts.Sprites != nil {
+		sprites := make(map[string]any)
+		for name, sprite := range opts.Sprites {
+			sprites[name] = []any{sprite.Offset.Milliseconds(), sprite.Duration.Milliseconds(), sprite.Loop}
+		}
+		tmp.Set("sprite", sprites)
+	}
+
+	if opts.Rate != nil {
+		tmp.Set("rate", opts.Rate)
+	}
+
+	if opts.Pool != nil {
+		tmp.Set("pool", opts.Pool)
+	}
+
+	if opts.XHR.Truthy() {
+		tmp.Set("xhr", opts.XHR)
+	}
+
+	if opts.Orientation != nil {
+		tmp.Set("orientation", opts.Orientation)
+	}
+
+	if opts.Stereo != nil {
+		tmp.Set("stereo", opts.Stereo)
+	}
+
+	if opts.Pos != nil {
+		tmp.Set("pos", opts.Pos)
+	}
+
+	// TODO: PannerAttr
+
+	if opts.OnLoad != nil {
+		callback0(tmp, "onload", opts.OnLoad)
+	}
+
+	if opts.OnLoadError != nil {
+		callbackerr(tmp, "onloaderror", opts.OnLoadError)
+	}
+
+	if opts.OnPlayError != nil {
+		callbackerr(tmp, "onplayerror", opts.OnPlayError)
+	}
+
+	if opts.OnPlay != nil {
+		callback1(tmp, "onplay", opts.OnPlay)
+	}
+
+	if opts.OnEnd != nil {
+		callback1(tmp, "onend", opts.OnEnd)
+	}
+
+	if opts.OnPause != nil {
+		callback1(tmp, "onpause", opts.OnPause)
+	}
+
+	if opts.OnStop != nil {
+		callback1(tmp, "onstop", opts.OnStop)
+	}
+
+	if opts.OnMute != nil {
+		callback1(tmp, "onmute", opts.OnMute)
+	}
+
+	if opts.OnVolume != nil {
+		callback1(tmp, "onvolume", opts.OnVolume)
+	}
+
+	if opts.OnRate != nil {
+		callback1(tmp, "onrate", opts.OnRate)
+	}
+
+	if opts.OnSeek != nil {
+		callback1(tmp, "onseek", opts.OnSeek)
+	}
+
+	if opts.OnFade != nil {
+		callback1(tmp, "onfade", opts.OnFade)
+	}
+
+	if opts.OnUnlock != nil {
+		callback0(tmp, "onunlock", opts.OnUnlock)
+	}
+
+	if opts.OnStereo != nil {
+		callback1(tmp, "onstereo", opts.OnStereo)
+	}
+
+	if opts.OnPos != nil {
+		callback1(tmp, "onpos", opts.OnPos)
+	}
+
+	if opts.OnOrientation != nil {
+		callback1(tmp, "onorientation", opts.OnOrientation)
+	}
+
+	return Howl{
+		value: howl.New(tmp),
+	}
 }
 
-type Sprite struct {
-	// the backing value
-	value js.Value
+// UsingWebAudio returns true if the Web Audio API is available.
+func UsingWebAudio() bool {
+	return howler.Get("usingWebAudio").Truthy()
+}
 
-	// The offset in milliseconds.
-	Offset int
+// NoAudio returns true if no audio is available.
+func NoAudio() bool {
+	return howler.Get("noAudio").Truthy()
+}
 
-	// The duration in milliseconds.
-	Duration int
+// AutoUnlock attempts to enable audio on mobile (iOS, Android, etc) devices and desktop Chrome/Safari.
+func AutoUnlock() bool {
+	return howler.Get("autoUnlock").Truthy()
+}
 
-	// Set to true to automatically loop the sprite forever.
-	Loop bool
+// HTML5PoolSize gets the pool size. Each HTML5 Audio object must be unlocked
+// individually, so we keep a global pool of unlocked nodes to share between all
+// Howl instances. This pool gets created on the first user interaction and is
+// set to the size of this property.
+func HTML5PoolSize() int {
+	return howler.Get("html5PoolSize").Int()
+}
+
+// AutoSuspend suspends the Web Audio AudioContext after 30 seconds of
+// inactivity to decrease processing and energy usage. Automatically resumes upon
+// new playback. Set this property to false to disable this behavior.
+func AutoSuspend() bool {
+	return howler.Get("autoSuspend").Truthy()
+}
+
+// SetAutoSuspend sets the AutoSuspend property.
+func SetAutoSuspend(auto bool) {
+	howler.Set("autoSuspend", auto)
+}
+
+// Muted gets the muted state.
+func Muted() bool {
+	return muted
+}
+
+// Mute or unmute all sounds.
+func Mute(mute bool) {
+	howler.Call("mute", mute)
+	muted = mute
+}
+
+// Volume gets the global volume for all sounds.
+func Volume() float64 {
+	return howler.Call("volume").Float()
+}
+
+// SetVolume sets the global volume for all sounds, relative to their own volume.
+func SetVolume(volume float64) {
+	howler.Call("volume", volume)
+}
+
+// Stop all sounds and reset their seek position to the beginning.
+func Stop() {
+	howler.Call("stop")
+}
+
+// Codecs checks supported audio codecs. Returns true if the codec is supported
+// in the current browser.
+func Codecs(extension string) bool {
+	return howler.Call("codecs", extension).Truthy()
+}
+
+// Unload and destroy all currently loaded Howl objects. This will immediately
+// stop all sounds and remove them from cache.
+func Unload() {
+	howler.Call("unload")
+}
+
+// ugly helper functions
+func callback0(value js.Value, event string, cb func()) {
+	value.Set(event, js.FuncOf(func(this js.Value, args []js.Value) any {
+		cb()
+		return nil
+	}))
+}
+
+func callback1(value js.Value, event string, cb func(int)) {
+	value.Set(event, js.FuncOf(func(this js.Value, args []js.Value) any {
+		cb(args[0].Int())
+		return nil
+	}))
+}
+
+func callbackerr(value js.Value, event string, cb func(error)) {
+	value.Set(event, js.FuncOf(func(this js.Value, args []js.Value) any {
+		cb(errors.New(args[1].String()))
+		return nil
+	}))
 }
