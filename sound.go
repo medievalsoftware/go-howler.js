@@ -77,7 +77,7 @@ type HowlOptions struct {
 	// Howler.js automatically detects your file format from the extension, but you
 	// may also specify a format in situations where extraction won't work (such as
 	// with a SoundCloud stream).
-	Formats []string
+	Format []any
 
 	// When using Web Audio, howler.js uses an XHR request to load the audio files.
 	// If you need to send custom headers, set the HTTP method or enable

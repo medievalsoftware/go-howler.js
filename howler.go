@@ -13,6 +13,10 @@ func New(opts HowlOptions) Howl {
 	var tmp = js.Global().Get("Object").New()
 	tmp.Set("src", opts.Source)
 
+	if opts.Format != nil {
+		tmp.Set("format", opts.Format)
+	}
+
 	if opts.Volume != nil {
 		tmp.Set("volume", opts.Volume)
 	}
