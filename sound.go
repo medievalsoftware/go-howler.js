@@ -1,5 +1,3 @@
-//go:build js && wasm
-
 package howler
 
 import (
@@ -7,6 +5,7 @@ import (
 	"time"
 )
 
+// State describes the load status of a given Howl.
 type State int
 
 const (
@@ -21,320 +20,271 @@ var states = map[string]State{
 	"loaded":   StateLoaded,
 }
 
-type Sprite struct {
-	// The offset in milliseconds.
-	Offset time.Duration
-	// The duration in milliseconds.
-	Duration time.Duration
-	// Set to true to automatically loop the sprite forever.
-	Loop bool
+type Sound interface {
+	ID() int
+	State() State
+	Playing() bool
+	Duration() time.Duration
+	Play() Sound
+	Pause()
+	Stop()
+	Mute()
+	Unmute()
+	Fade(from float64, to float64, duration time.Duration)
+	Volume() float64
+	SetVolume(volume float64)
+	Rate() float64
+	SetRate(float64)
+	Seek() time.Duration
+	SetSeek(duration time.Duration)
+	Loop() bool
+	SetLoop(loop bool)
+	Stereo() float64
+	SetStereo(stereo float64)
+	Pos() (x, y, z float64)
+	SetPos(x, y, z float64)
+	Orientation() (x, y, z float64)
+	SetOrientation(x, y, z float64)
+	PannerAttr() PannerAttr
+	SetPannerAttr(attr PannerAttr)
 }
 
-type HowlOptions struct {
-	// The sources to the track(s) to be loaded for the sound (URLs or base64 data
-	// URIs). These should be in order of preference, howler.js will automatically
-	// load the first one that is compatible with the current browser. If your files
-	// have no extensions, you will need to explicitly specify the extension using
-	// the format property.
-	Source []any
-
-	// The volume of the specific track, from 0.0 to 1.0.
-	Volume any // default=Howler's global volume
-
-	// Set to true to force HTML5 Audio. This should be used for large audio files so
-	// that you don't have to wait for the full file to be downloaded and decoded
-	// before playing.
-	HTML5 bool
-
-	// Set to true to automatically loop the sound forever.
-	Loop bool
-
-	// Automatically begin downloading the audio file when the Howl is defined. If
-	// using HTML5 Audio, you can set this to 'metadata' to only preload the file's
-	// metadata (to get its duration without download the entire file, for example).
-	Preload any // default=true
-
-	// Set to true to automatically start playback when sound is loaded.
-	Autoplay bool
-
-	// Set to true to load the audio muted.
-	Mute bool
-
-	// Define a sound sprite for the sound.
-	Sprites map[string]Sprite
-
-	// The rate of playback. 0.5 to 4.0, with 1.0 being normal speed.
-	Rate any // default=1.0
-
-	// The size of the inactive sounds pool. Once sounds are stopped or finish
-	// playing, they are marked as ended and ready for cleanup. We keep a pool of
-	// these to recycle for improved performance. Generally this doesn't need to be
-	// changed. It is important to keep in mind that when a sound is paused, it won't
-	// be removed from the pool and will still be considered active so that it can be
-	// resumed later.
-	Pool any // default=5
-
-	// Howler.js automatically detects your file format from the extension, but you
-	// may also specify a format in situations where extraction won't work (such as
-	// with a SoundCloud stream).
-	Format []any
-
-	// When using Web Audio, howler.js uses an XHR request to load the audio files.
-	// If you need to send custom headers, set the HTTP method or enable
-	// withCredentials (see reference), include them with this parameter. Each is
-	// optional (method defaults to GET, headers default to null and withCredentials
-	// defaults to false).
-	XHR js.Value
-
-	// Sets the direction the audio source is pointing in the 3D cartesian coordinate
-	// space. Depending on how directional the sound is, based on the cone
-	// attributes, a sound pointing away from the listener can be quiet or silent.
-	Orientation []any
-
-	// Sets the stereo panning value of the audio source for this sound or group.
-	// This makes it easy to setup left/right panning with a value of -1.0 being far
-	// left and a value of 1.0 being far right.
-	Stereo any
-
-	// Sets the 3D spatial position of the audio source for this sound or group
-	// relative to the global listener.
-	Pos []any
-
-	// Sets the panner node's attributes for a sound or group of sounds. See the
-	// pannerAttr method for all available options.
-	PannerAttr js.Value
-	// TODO: PannerAttribute struct
-
-	// Fires when the sound is loaded.
-	OnLoad func()
-
-	// Fires when the sound is unable to load.
-	OnLoadError func(error)
-
-	// Fires when the sound is unable to play.
-	OnPlayError func(error)
-
-	// Fires when the sound begins playing.
-	OnPlay func(id int)
-
-	// Fires when the sound finishes playing (if it is looping, it'll fire at the end
-	// of each loop).
-	OnEnd func(id int)
-
-	// Fires when the sound has been paused.
-	OnPause func(id int)
-
-	// Fires when the sound has been stopped.
-	OnStop func(id int)
-
-	// Fires when the sound has been muted/unmuted.
-	OnMute func(id int)
-
-	// Fires when the sound's volume has changed.
-	OnVolume func(id int)
-
-	//Fires when the sound's playback rate has changed.
-	OnRate func(id int)
-
-	//Fires when the sound has been seeked.
-	OnSeek func(id int)
-
-	// Fires when the current sound finishes fading in/out.
-	OnFade func(id int)
-
-	// Fires when audio has been automatically unlocked through a touch/click event.
-	OnUnlock func()
-
-	// Fires when the current sound has the stereo panning changed.
-	OnStereo func(id int)
-
-	// Fires when the current sound has the listener position changed.
-	OnPos func(id int)
-
-	// Fires when the current sound has the direction of the listener changed.
-	OnOrientation func(id int)
-}
-
-type Howl struct {
+type soundGroup struct {
 	value js.Value
 }
 
-// Play begins playback of a sound. Returns the sound id to be used with other
-// methods.
-func (h Howl) Play() int {
-	return h.value.Call("play").Int()
+func (g soundGroup) ID() int {
+	return -1
 }
 
-// PlayID will play a new sound will play based on the sprite's definition.
-func (h Howl) PlayID(id int) int {
-	return h.value.Call("play", js.ValueOf(id)).Int()
+func (g soundGroup) State() State {
+	return states[g.value.Call("state").String()]
 }
 
-// PlaySprite will play the previously played sound (for example, after pausing
-// it). However, if an id of a sound that has been drained from the pool is
-// passed, nothing will play.
-func (h Howl) PlaySprite(name string) int {
-	return h.value.Call("play", name).Int()
+func (g soundGroup) Playing() bool {
+	return g.value.Call("playing").Bool()
 }
 
-// Pause pauses playback of the group, saving the seek of playback.
-func (h Howl) Pause() {
-	h.value.Call("pause")
+func (g soundGroup) Duration() time.Duration {
+	return time.Duration(g.value.Call("duration").Float() * float64(time.Second))
 }
 
-// PauseID pauses playback of the sound, saving the seek of playback.
-func (h Howl) PauseID(id int) {
-	h.value.Call("pause", id)
+func (g soundGroup) Play() Sound {
+	if result := g.value.Call("play"); result.Truthy() {
+		return soundSpecific{
+			id:    result.Int(),
+			value: g.value,
+		}
+	}
+	return soundGroup{}
 }
 
-// Stop stops all sounds of the group, resetting seek to 0.
-func (h Howl) Stop() {
-	h.value.Call("stop")
+func (g soundGroup) Pause() {
+	g.value.Call("pause")
 }
 
-// StopID stops playback of sound, resetting seek to 0.
-func (h Howl) StopID(id int) {
-	h.value.Call("stop", id)
+func (g soundGroup) Stop() {
+	g.value.Call("stop")
 }
 
-func (h Howl) Muted() bool {
-	return h.value.Call("mute").Bool()
+func (g soundGroup) Mute() {
+	g.value.Call("mute", true)
 }
 
-// Mute all sounds in the group.
-func (h Howl) Mute() {
-	h.value.Call("mute", true)
+func (g soundGroup) Unmute() {
+	g.value.Call("mute", false)
 }
 
-// Unmute all sounds in the group.
-func (h Howl) Unmute() {
-	h.value.Call("mute", false)
+func (g soundGroup) Fade(from float64, to float64, duration time.Duration) {
+	g.value.Call("fade", from, to, duration.Milliseconds())
 }
 
-// MuteID mutes a sound, but doesn't pause the playback.
-func (h Howl) MuteID(id int) {
-	h.value.Call("mute", true, id)
+func (g soundGroup) Volume() float64 {
+	return g.value.Call("volume").Float()
 }
 
-// UnmuteID unmutes a sound.
-func (h Howl) UnmuteID(id int) {
-	h.value.Call("mute", false, id)
+func (g soundGroup) SetVolume(volume float64) {
+	g.value.Call("volume", volume)
 }
 
-// Volume gets the volume of the group.
-func (h Howl) Volume() float64 {
-	return h.value.Call("volume").Float()
+func (g soundGroup) Rate() float64 {
+	return g.value.Call("rate").Float()
 }
 
-// SetVolume sets the volume of all the sounds in the group relative to their own
-// volume.
-func (h Howl) SetVolume(volume float64) {
-	h.value.Call("volume", volume)
+func (g soundGroup) SetRate(rate float64) {
+	g.value.Call("rate", rate)
 }
 
-// SetVolumeID sets the volume of a sound.
-func (h Howl) SetVolumeID(id int, volume float64) {
-	h.value.Call("volume", volume, id)
+func (g soundGroup) Seek() time.Duration {
+	return time.Duration(g.value.Call("seek").Float() * float64(time.Second))
 }
 
-// Fade fades all sounds in the group.
-func (h Howl) Fade(from, to float64, duration time.Duration) {
-	h.value.Call("fade", from, to, duration.Milliseconds())
+func (g soundGroup) SetSeek(position time.Duration) {
+	g.value.Call("seek", position.Seconds())
 }
 
-// FadeID fades a sound between two volumes. Fires the OnFade event when complete.
-func (h Howl) FadeID(id int, from, to float64, duration time.Duration) {
-	h.value.Call("fade", from, to, duration.Milliseconds(), id)
+func (g soundGroup) Loop() bool {
+	return g.value.Call("loop").Bool()
 }
 
-// Rate gets the rate of the group.
-func (h Howl) Rate() float64 {
-	return h.value.Call("rate").Float()
+func (g soundGroup) SetLoop(loop bool) {
+	g.value.Call("loop", loop)
 }
 
-// SetRate sets the rate of the group. Playback rate of all sounds in group will
-// change.
-func (h Howl) SetRate(rate float64) {
-	h.value.Call("rate", rate)
+func (g soundGroup) Stereo() float64 {
+	return g.value.Call("stereo").Float()
 }
 
-// SetRateID sets the rate of a sound in the group.
-func (h Howl) SetRateID(id int, rate float64) {
-	h.value.Call("rate", rate, id)
+func (g soundGroup) SetStereo(stereo float64) {
+	g.value.Call("stereo", stereo)
 }
 
-// Seek gets the position of playback for the first sound.
-func (h Howl) Seek() time.Duration {
-	return time.Duration(h.value.Call("seek").Float() * float64(time.Second))
+func (g soundGroup) Pos() (x, y, z float64) {
+	pos := g.value.Call("pos")
+	x = pos.Index(0).Float()
+	y = pos.Index(1).Float()
+	z = pos.Index(2).Float()
+	return
 }
 
-// SetSeek sets the position of playback for the first sound.
-func (h Howl) SetSeek(seek time.Duration) {
-	h.value.Call("seek", seek.Seconds())
+func (g soundGroup) SetPos(x, y, z float64) {
+	g.value.Call("pos", x, y, z)
 }
 
-func (h Howl) SetSeekID(id int, seek time.Duration) {
-	h.value.Call("seek", seek.Seconds(), id)
+func (g soundGroup) Orientation() (x, y, z float64) {
+	pos := g.value.Call("orientation")
+	x = pos.Index(0).Float()
+	y = pos.Index(1).Float()
+	z = pos.Index(2).Float()
+	return
 }
 
-// Loop gets whether the first sound will loop.
-func (h Howl) Loop() bool {
-	return h.value.Call("loop").Bool()
+func (g soundGroup) SetOrientation(x, y, z float64) {
+	g.value.Call("orientation", x, y, z)
 }
 
-// SetLoop sets whether all sounds in the group will loop.
-func (h Howl) SetLoop(loop bool) {
-	h.value.Call("loop", loop)
+func (g soundGroup) PannerAttr() PannerAttr {
+	return PannerAttr{value: g.value.Call("pannerAttr")}
 }
 
-// SetLoopID sets whether a sound in the group will loop.
-func (h Howl) SetLoopID(id int, loop bool) {
-	h.value.Call("loop", loop, id)
+func (g soundGroup) SetPannerAttr(attr PannerAttr) {
+	g.value.Call("pannerAttr", attr.value)
 }
 
-// State checks the load status of the Howl, returns a unloaded, loading or loaded.
-func (h Howl) State() State {
-	return states[h.value.Call("state").String()]
+type soundSpecific struct {
+	id    int
+	value js.Value
 }
 
-// Playing checks if any sound in the group is playing.
-func (h Howl) Playing() bool {
-	return h.value.Call("playing").Bool()
+func (s soundSpecific) ID() int {
+	return s.id
 }
 
-// PlayingID checks if a sound in the group is playing.
-func (h Howl) PlayingID(id int) bool {
-	return h.value.Call("playing", id).Bool()
+func (s soundSpecific) State() State {
+	return states[s.value.Call("state").String()]
 }
 
-// Duration gets the duration of the audio source. Returns zero until the load event has fired.
-func (h Howl) Duration() time.Duration {
-	return time.Duration(h.value.Call("duration").Float() * float64(time.Second))
+func (s soundSpecific) Playing() bool {
+	return s.value.Call("playing", s.id).Bool()
 }
 
-// DurationID gets return the duration of the sprite being played on this
-// instance; otherwise, the full source duration is returned.
-func (h Howl) DurationID(id int) time.Duration {
-	return time.Duration(h.value.Call("duration", id).Float() * float64(time.Second))
+func (s soundSpecific) Duration() time.Duration {
+	return time.Duration(s.value.Call("duration", s.id).Float() * float64(time.Second))
 }
 
-// TODO: on(event, function, [id])
-// TODO: once(event, function, [id])
-// TODO: off(event, [function], [id])
-
-// Load is called by default, but if you set preload to false, you must call load
-// before you can play any sounds.
-func (h Howl) Load() {
-	h.value.Call("load")
+func (s soundSpecific) Play() Sound {
+	s.value.Call("play", s.id)
+	return s
 }
 
-// Unload and destroy a Howl object. This will immediately stop all sounds
-// attached to this sound and remove it from the cache.
-func (h Howl) Unload() {
-	h.value.Call("unload")
+func (s soundSpecific) Pause() {
+	s.value.Call("pause", s.id)
 }
 
-// TODO: [Set]Stereo[ID]
-// TODO: [Set]Pos[ID]
-// TODO: [Set]Orientation[ID]
-// TODO: [Set]PannerAttributes[ID]
+func (s soundSpecific) Stop() {
+	s.value.Call("stop", s.id)
+}
+
+func (s soundSpecific) Mute() {
+	s.value.Call("mute", true, s.id)
+}
+
+func (s soundSpecific) Unmute() {
+	s.value.Call("mute", false, s.id)
+}
+
+func (s soundSpecific) Fade(from float64, to float64, duration time.Duration) {
+	s.value.Call("fade", from, to, duration.Milliseconds(), s.id)
+}
+
+func (s soundSpecific) Volume() float64 {
+	return s.value.Call("volume", s.id).Float()
+}
+
+func (s soundSpecific) SetVolume(volume float64) {
+	s.value.Call("volume", volume, s.id)
+}
+
+func (s soundSpecific) Stereo() float64 {
+	return s.value.Call("stereo", s.id).Float()
+}
+
+func (s soundSpecific) SetStereo(stereo float64) {
+	s.value.Call("stereo", stereo, s.id)
+}
+
+func (s soundSpecific) Rate() float64 {
+	return s.value.Call("rate", s.id).Float()
+}
+
+func (s soundSpecific) SetRate(rate float64) {
+	s.value.Call("rate", rate, s.id)
+}
+
+func (s soundSpecific) Seek() time.Duration {
+	return time.Duration(s.value.Call("seek", s.id).Float() * float64(time.Second))
+}
+
+func (s soundSpecific) SetSeek(position time.Duration) {
+	s.value.Call("seek", position.Seconds(), s.id)
+}
+
+func (s soundSpecific) Loop() bool {
+	return s.value.Call("loop", s.id).Bool()
+}
+
+func (s soundSpecific) SetLoop(loop bool) {
+	s.value.Call("loop", loop, s.id)
+}
+
+func (s soundSpecific) Pos() (x, y, z float64) {
+	pos := s.value.Call("pos", js.Null(), js.Null(), js.Null(), s.id)
+	x = pos.Index(0).Float()
+	y = pos.Index(1).Float()
+	z = pos.Index(2).Float()
+	return
+}
+
+func (s soundSpecific) SetPos(x, y, z float64) {
+	s.value.Call("pos", x, y, z)
+}
+
+func (s soundSpecific) Orientation() (x, y, z float64) {
+	pos := s.value.Call("orientation", js.Null(), js.Null(), js.Null(), s.id)
+	x = pos.Index(0).Float()
+	y = pos.Index(1).Float()
+	z = pos.Index(2).Float()
+	return
+}
+
+func (s soundSpecific) SetOrientation(x, y, z float64) {
+	s.value.Call("orientation", x, y, z)
+}
+
+func (s soundSpecific) PannerAttr() PannerAttr {
+	return PannerAttr{value: s.value.Call("pannerAttr", s.id)}
+}
+
+func (s soundSpecific) SetPannerAttr(attr PannerAttr) {
+	s.value.Call("pannerAttr", attr.value, s.id)
+}
