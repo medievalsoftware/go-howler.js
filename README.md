@@ -19,8 +19,7 @@ func main() {
 		Volume:   0.5,
 		Autoplay: true,
 		Loop:     true,
-
-		OnEnd: func(id int) {
+		OnEnd: func() {
 			println("finished!")
 		},
 	})
