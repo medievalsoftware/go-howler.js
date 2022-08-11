@@ -1,6 +1,6 @@
 # go-howler.js
 
-Golang wrapper for [Howler.js](https://github.com/goldfire/howler.js) using the `syscall/js` package.
+A Go wrapping of [Howler.js](https://github.com/goldfire/howler.js) using the `syscall/js` package.
 
 ## Example
 
