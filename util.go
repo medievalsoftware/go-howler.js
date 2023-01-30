@@ -2,6 +2,8 @@ package howler
 
 import (
 	"errors"
+	"fmt"
+	"reflect"
 	"syscall/js"
 )
 
@@ -13,27 +15,30 @@ type OptionalFloat = any
 type OptionalBool = any
 type OptionalString = any
 
-func setCallback(value js.Value, event string, fn any) {
-	if fn == nil {
+func setCallback(value js.Value, event string, callback any) {
+	var fn js.Func
+
+	if reflect.ValueOf(callback).IsNil() {
 		return
 	}
 
-	var jsfunc js.Func
-
-	switch fn := fn.(type) {
+	switch callback := callback.(type) {
+	case nil:
+		fmt.Println(value, event, "nil")
+		return
 	case CallbackFunc:
-		jsfunc = js.FuncOf(func(this js.Value, args []js.Value) any {
-			fn()
+		fn = js.FuncOf(func(this js.Value, args []js.Value) any {
+			callback()
 			return nil
 		})
 	case CallbackErrorFunc:
-		jsfunc = js.FuncOf(func(this js.Value, args []js.Value) any {
-			fn(errors.New(args[1].String()))
+		fn = js.FuncOf(func(this js.Value, args []js.Value) any {
+			callback(errors.New(args[1].String()))
 			return nil
 		})
 	}
 
-	if jsfunc.Truthy() {
-		value.Set(event, jsfunc)
+	if fn.Truthy() {
+		value.Set(event, fn)
 	}
 }
